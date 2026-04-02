@@ -1900,16 +1900,8 @@ async function initWindowState() {
         const position = await appWindow.outerPosition();
         const size = await appWindow.outerSize();
         
-        console.log('[窗口状态] 准备保存: x=', position.x, ', y=', position.y, ', w=', size.width, ', h=', size.height);
-        
-        if (position.x < -10000 || position.y < -10000) {
-          console.log('[窗口状态] 位置无效，跳过保存');
-          return;
-        }
-        if (size.width < 200 || size.height < 300) {
-          console.log('[窗口状态] 尺寸无效，跳过保存');
-          return;
-        }
+        if (position.x < -10000 || position.y < -10000) return;
+        if (size.width < 200 || size.height < 300) return;
         
         await invoke('save_window_state', {
           x: position.x,
@@ -1917,7 +1909,6 @@ async function initWindowState() {
           width: size.width,
           height: size.height
         });
-        console.log('[窗口状态] 保存成功');
       } catch(e) {
         console.error('保存窗口状态失败:', e);
       }

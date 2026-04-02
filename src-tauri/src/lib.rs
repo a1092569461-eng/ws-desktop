@@ -93,6 +93,12 @@ async fn get_popup_data(popup_id: String) -> Option<serde_json::Value> {
 }
 
 #[tauri::command]
+async fn clear_popup_data(popup_id: String) {
+    let mut store = get_popup_store().lock().unwrap();
+    store.data.remove(&popup_id);
+}
+
+#[tauri::command]
 async fn copy_to_clipboard(_app: AppHandle, text: String, image_url: Option<String>) -> Result<(), String> {
     let text = clean_text_for_copy(text);
     
@@ -377,13 +383,7 @@ async fn set_window_always_on_top(app: AppHandle, enabled: bool) -> Result<(), S
 
 #[tauri::command]
 async fn save_window_state(app: AppHandle, x: i32, y: i32, width: u32, height: u32) -> Result<(), String> {
-    if x < -10000 || y < -10000 {
-        println!("[窗口状态] 拒绝保存无效位置: x={}, y={}", x, y);
-        return Ok(());
-    }
-    
-    if width < 200 || height < 300 {
-        println!("[窗口状态] 拒绝保存无效尺寸: width={}, height={}", width, height);
+    if x < -10000 || y < -10000 || width < 200 || height < 300 {
         return Ok(());
     }
     
@@ -391,7 +391,6 @@ async fn save_window_state(app: AppHandle, x: i32, y: i32, width: u32, height: u
         .map_err(|e| format!("获取存储失败: {}", e))?;
 
     let state = WindowState { x, y, width, height };
-    println!("[窗口状态] 保存: x={}, y={}, width={}, height={}", x, y, width, height);
     store.set("main_window", serde_json::to_value(state).map_err(|e| format!("序列化失败: {}", e))?);
 
     if let Err(e) = store.save() {
@@ -585,6 +584,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             debug_log,
             get_popup_data,
+            clear_popup_data,
             copy_to_clipboard,
             fetch_image,
             show_highlight_popup,

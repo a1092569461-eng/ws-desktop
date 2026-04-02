@@ -226,8 +226,12 @@ async function getContextMessages(groupId, currentLocalId) {
   return messages;
 }
 
-document.getElementById('closeBtn').addEventListener('click', () => {
-  getCurrentWindow().close();
+document.getElementById('closeBtn').addEventListener('click', async () => {
+  try {
+    await getCurrentWindow().destroy();
+  } catch(e) {
+    window.close();
+  }
 });
 
 const urlParams = new URLSearchParams(window.location.search);

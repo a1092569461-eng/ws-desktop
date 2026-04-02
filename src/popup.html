@@ -330,10 +330,14 @@ function startAutoClose() {
     if (elapsed >= AUTO_CLOSE_TIMEOUT) {
       clearInterval(autoCloseTimer);
       try {
+        const popupId = window.location.hash.substring(1);
+        if (popupId) {
+          await invoke('clear_popup_data', { popupId: popupId });
+        }
         const win = getCurrentWindow();
         await win.destroy();
       } catch(e) {
-        console.error('关闭窗口失败:', e);
+        console.error('[弹窗] 关闭失败:', e);
         window.close();
       }
     }
@@ -354,6 +358,11 @@ async function renderPopup(data) {
   popupData = data;
 
   const body = document.getElementById('popupBody');
+  
+  if (!data) {
+    console.error('[弹窗] data 为空，无法渲染');
+    return;
+  }
   const source = data.group_name || data.source || '未知来源';
   const time = formatTime(data.msg_time || data.time || Date.now() / 1000);
   const rawContent = data.raw_message || data.content || '';
@@ -450,8 +459,6 @@ async function renderPopup(data) {
 
 window.resizeForContent = async function() {
   try {
-    console.log('[弹窗] 开始调整大小...');
-    
     const container = document.getElementById('popupContainer');
     const body = document.getElementById('popupBody');
     const countdownBar = document.getElementById('countdownBar');
@@ -465,20 +472,8 @@ window.resizeForContent = async function() {
     await new Promise(resolve => requestAnimationFrame(resolve));
     await new Promise(resolve => setTimeout(resolve, 150));
     
-    const imgs = body.querySelectorAll('.msg-image');
-    let imgReady = true;
-    for (const img of imgs) {
-      if (!img.complete || img.naturalWidth === 0) {
-        imgReady = false;
-        console.log('[弹窗] 图片未加载完成:', img.src.substring(0, 50));
-      }
-    }
-    console.log('[弹窗] 图片状态:', imgReady ? '全部加载完成' : '部分未完成');
-    
     const contentHeight = body.scrollHeight;
     const contentWidth = body.scrollWidth;
-    
-    console.log('[弹窗] 内容尺寸: scrollHeight=', contentHeight, ', scrollWidth=', contentWidth);
     
     const countdownHeight = countdownBar ? 4 : 0;
     const padding = 24;
@@ -490,8 +485,6 @@ window.resizeForContent = async function() {
 
     const finalWidth = Math.min(Math.max(contentWidth + padding, 350), Math.floor(window.screen.width * 0.5));
 
-    console.log('[弹窗] 计算结果: totalHeight=', totalHeight, ', finalHeight=', finalHeight, ', finalWidth=', finalWidth);
-
     body.style.overflow = 'auto';
     if (totalHeight > maxHeight) {
       body.style.height = (finalHeight - countdownHeight - padding) + 'px';
@@ -501,9 +494,7 @@ window.resizeForContent = async function() {
     container.style.height = '100%';
 
     const win = getCurrentWindow();
-    console.log('[弹窗] 设置窗口大小: ', finalWidth, 'x', finalHeight);
     await win.setSize({ type: 'Physical', width: Math.round(finalWidth), height: Math.round(finalHeight) });
-    console.log('[弹窗] 窗口大小设置完成');
   } catch(e) {
     console.error('调整窗口大小失败:', e);
   }
@@ -544,6 +535,18 @@ async function handleCopy() {
   }
 }
 
+async function closePopup() {
+  try {
+    const popupId = window.location.hash.substring(1);
+    if (popupId) {
+      await invoke('clear_popup_data', { popupId: popupId });
+    }
+    await getCurrentWindow().destroy();
+  } catch(e) {
+    window.close();
+  }
+}
+
 async function handleContext() {
   if (!popupData) return;
 
@@ -564,13 +567,7 @@ async function handleContext() {
 
     btn.textContent = '✓';
     
-    setTimeout(async () => {
-      try {
-        await getCurrentWindow().destroy();
-      } catch(e) {
-        window.close();
-      }
-    }, 200);
+    setTimeout(closePopup, 200);
   } catch(e) {
     console.error('查看上下文失败:', e);
     btn.textContent = '失败';
@@ -603,11 +600,7 @@ listen('popup-data', (event) => {
 
 setTimeout(async () => {
   if (!popupData) {
-    try {
-      await getCurrentWindow().destroy();
-    } catch(e) {
-      window.close();
-    }
+    closePopup();
   }
 }, 3000);
 
@@ -615,6 +608,8 @@ async function saveWindowState() {
   try {
     const win = getCurrentWindow();
     const position = await win.outerPosition();
+    
+    if (position.x < -10000 || position.y < -10000) return;
     
     await invoke('save_popup_state', {
       x: position.x,
