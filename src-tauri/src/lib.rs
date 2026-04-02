@@ -567,8 +567,8 @@ pub fn run() {
                         if let Some(value) = store.get("main_window") {
                             if let Ok(state) = serde_json::from_value::<WindowState>(value) {
                                 if state.x > -10000 && state.y > -10000 && state.width >= 200 && state.height >= 300 {
-                                    let _ = window.set_position(tauri::LogicalPosition::new(state.x as f64, state.y as f64));
-                                    let _ = window.set_size(tauri::LogicalSize::new(state.width as f64, state.height as f64));
+                                    let _ = window.set_position(tauri::PhysicalPosition::new(state.x, state.y));
+                                    let _ = window.set_size(tauri::PhysicalSize::new(state.width, state.height));
                                 }
                             }
                         }

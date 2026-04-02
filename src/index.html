@@ -1853,41 +1853,7 @@ async function initSettings() {
 }
 
 async function initWindowState() {
-  try {
-    const state = await invoke('load_window_state');
-    
-    if (state) {
-      const screen = window.screen;
-      const screenWidth = screen.availWidth;
-      const screenHeight = screen.availHeight;
-      
-      const isValidPosition = state.x > -10000 && state.y > -10000 && 
-                              state.x < screenWidth && state.y < screenHeight;
-      
-      if (isValidPosition) {
-        try {
-          await appWindow.setPosition({ type: 'Physical', x: state.x, y: state.y });
-        } catch(e) {
-          console.error('位置设置失败:', e);
-        }
-      }
-      
-      if (state.width >= 200 && state.height >= 300) {
-        try {
-          await appWindow.setSize({ type: 'Physical', width: state.width, height: state.height });
-        } catch(e) {
-          console.error('大小设置失败:', e);
-        }
-      }
-
-      await scrollToBottom();
-    } else {
-      await scrollToBottom();
-    }
-  } catch(e) {
-    console.error('加载窗口状态失败:', e);
-    await scrollToBottom();
-  }
+  await scrollToBottom();
 
   let saveStateTimer = null;
   let isMinimized = false;
@@ -1948,11 +1914,6 @@ async function initApp() {
   await renderSavedMessages();
   await initSettings();
   await initWindowState();
-  
-  if (typeof appWindow !== 'undefined') {
-    appWindow.show().catch(() => {});
-    appWindow.setFocus().catch(() => {});
-  }
   
   listen('show-context-request', (event) => {
     const { groupId, groupName, localId } = event.payload;
