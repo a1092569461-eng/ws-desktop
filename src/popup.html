@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>重点消息</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:#fff;
+    overflow:hidden;
+    padding:0;
+  }
+  .popup-container{
+    display:flex;
+    flex-direction:column;
+    height:100vh;
+  }
+  .popup-body{
+    flex:1;
+    overflow-y:auto;
+    background:#fff;
+    padding:12px;
+  }
+  .btn{
+    padding:6px 12px;
+    border:none;
+    border-radius:4px;
+    cursor:pointer;
+    font-size:12px;
+    font-weight:500;
+    transition:all 0.2s;
+  }
+  .copy-btn{background:#f5f5f5;color:#666;}
+  .copy-btn:hover{background:#e0e0e0;}
+  .copy-btn.copied{background:#4caf50;color:#fff;}
+  .context-btn{background:#e3f2fd;color:#1976d2;}
+  .context-btn:hover{background:#bbdefb;}
+  .countdown-bar{
+    height:2px;
+    background:linear-gradient(90deg,#ff9800,#ff5722);
+    transform-origin:left;
+    animation:countdown 10s linear forwards;
+  }
+  @keyframes countdown{
+    from{transform:scaleX(1);}
+    to{transform:scaleX(0);}
+  }
+  .msg-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:8px 0;
+    border-bottom:1px solid #f0f0f0;
+    margin-bottom:8px;
+  }
+  .msg-source-wrap{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex:1;
+    min-width:0;
+    overflow:hidden;
+  }
+  .msg-source{
+    font-weight:600;
+    color:#1a1a1a;
+    font-size:13px;
+    white-space:nowrap;
+  }
+  .msg-source .group-icon{
+    color:#07c160;
+    margin-right:4px;
+  }
+  .match-reason{
+    font-size:11px;
+    color:#ff9800;
+    margin-left:6px;
+    white-space:nowrap;
+  }
+  .msg-time{
+    color:#999;
+    font-size:11px;
+    white-space:nowrap;
+    margin-left:6px;
+    flex-shrink:0;
+  }
+  .msg-body{
+    padding:8px 0;
+  }
+  .msg-content{
+    color:#333;
+    line-height:1.6;
+    white-space:pre-wrap;
+    word-break:break-all;
+    font-size:13px;
+  }
+  .msg-link{
+    color:#1976d2;
+    text-decoration:underline;
+    cursor:pointer;
+  }
+  .msg-image{
+    max-width:100%;
+    max-height:250px;
+    border-radius:6px;
+    margin-top:8px;
+    display:block;
+    cursor:zoom-in;
+  }
+  .msg-footer{
+    padding:8px 0;
+    border-top:1px solid #f5f5f5;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-top:8px;
+  }
+  .msg-meta{
+    color:#999;
+    font-size:11px;
+  }
+  .msg-meta span{
+    margin-right:10px;
+  }
+  .dup-groups{
+    display:none;
+    padding:6px 0;
+    font-size:11px;
+    color:#666;
+  }
+  .dup-groups.show{
+    display:block;
+  }
+  .dup-groups-list{
+    padding:6px 8px;
+    background:#fafafa;
+    border-radius:4px;
+    margin-top:6px;
+    display:flex;
+    flex-wrap:wrap;
+    gap:3px;
+  }
+  .dup-groups-list span{
+    background:#f0f0f0;
+    padding:2px 6px;
+    border-radius:3px;
+  }
+  .loading{text-align:center;padding:20px;color:#999;font-size:13px;}
+  .img-overlay{
+    position:fixed;
+    top:0;
+    left:0;
+    right:0;
+    bottom:0;
+    background:rgba(0,0,0,0.9);
+    z-index:9999;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    cursor:zoom-out;
+  }
+  .img-overlay.show{
+    display:flex;
+  }
+  .img-overlay img{
+    max-width:95%;
+    max-height:95%;
+    object-fit:contain;
+  }
+</style>
+</head>
+<body>
+<div class="popup-container" id="popupContainer">
+  <div class="popup-body" id="popupBody">
+    <div class="loading">加载中...</div>
+  </div>
+  <div class="countdown-bar" id="countdownBar"></div>
+</div>
+
+<div class="img-overlay" id="imgOverlay">
+  <img id="overlayImg" src="">
+</div>
+
+<script type="module">
+const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
+const { getCurrentWindow } = window.__TAURI__.window;
+const { open } = window.__TAURI__.shell;
+
+let popupData = null;
+let autoCloseTimer = null;
+let autoCloseStartTime = 0;
+const AUTO_CLOSE_TIMEOUT = 10000;
+const CQ_IMAGE_REG = /\[CQ:image,[^\]]+\]/g;
+
+async function loadPopupData() {
+  const hash = window.location.hash.substring(1);
+  
+  if (hash) {
+    try {
+      const data = await invoke('get_popup_data', { popupId: hash });
+      if (data) {
+        renderPopup(data);
+      }
+    } catch(e) {
+      console.error('获取数据失败:', e);
+    }
+  }
+}
+
+setTimeout(loadPopupData, 100);
+
+const imageCache = new Map();
+const MAX_CACHE_SIZE = 50;
+
+async function loadImageToDataUrl(url) {
+  if (imageCache.has(url)) {
+    const value = imageCache.get(url);
+    imageCache.delete(url);
+    imageCache.set(url, value);
+    return value;
+  }
+  try {
+    const dataUrl = await invoke('fetch_image', { url });
+    if (imageCache.size >= MAX_CACHE_SIZE) {
+      const firstKey = imageCache.keys().next().value;
+      imageCache.delete(firstKey);
+    }
+    imageCache.set(url, dataUrl);
+    return dataUrl;
+  } catch(e) {
+    console.warn('图片加载失败:', url, e);
+    return null;
+  }
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function escapeAttr(text) {
+  return String(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function makeLinksClickable(text) {
+  const urlPattern = /((https?:\/\/|www\.)[^\s<>"]+)/gi;
+  return text.replace(urlPattern, (url) => {
+    let href = url.startsWith('www.') ? 'https://' + url : url;
+    try {
+      const parsed = new URL(href);
+      if (!['http:', 'https:'].includes(parsed.protocol)) return escapeAttr(url);
+    } catch(e) {
+      return escapeAttr(url);
+    }
+    return `<a href="${href}" onclick="event.preventDefault(); window.openLink('${href}');" class="msg-link">${escapeAttr(url)}</a>`;
+  });
+}
+
+window.openLink = async function(url) {
+  try {
+    await open(url);
+  } catch(e) {
+    window.open(url, '_blank');
+  }
+};
+
+function formatTime(timestamp) {
+  if (!timestamp) return '';
+  const d = new Date(timestamp * 1000);
+  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function cleanContent(content) {
+  content = String(content);
+  content = content.replace(CQ_IMAGE_REG, '');
+  content = content.replace(/\[CQ:reply,[^\]]+\]/g, '');
+  content = content.replace(/\[CQ:at,qq=\d+,name=([^\]]+)\]/g, '@$1');
+  content = content.replace(/\[CQ:[^\]]+\]/g, '');
+  content = content.replace(/&#91;/g, '[');
+  content = content.replace(/&#93;/g, ']');
+  content = content.replace(/&amp;/g, '&');
+  content = content.trim();
+  return content;
+}
+
+function cleanContentForCopy(content) {
+  content = String(content);
+  content = content.replace(CQ_IMAGE_REG, '');
+  content = content.replace(/\[CQ:reply,[^\]]+\]/g, '');
+  content = content.replace(/\[CQ:at,qq=\d+,name=([^\]]+)\]/g, '@$1');
+  content = content.replace(/\[CQ:[^\]]+\]/g, '');
+  content = content.replace(/&#91;/g, '[');
+  content = content.replace(/&#93;/g, ']');
+  content = content.replace(/&amp;/g, '&');
+  content = content.trim();
+  let lines = content.split(/\r?\n/);
+  let result = [];
+  let lastLineIsEmpty = false;
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    let isEmpty = line.trim() === '';
+    if (!isEmpty) {
+      result.push(line);
+      lastLineIsEmpty = false;
+    } else {
+      if (!lastLineIsEmpty) {
+        result.push('');
+        lastLineIsEmpty = true;
+      }
+    }
+  }
+  content = result.join('\n');
+  return content;
+}
+
+function startAutoClose() {
+  if (autoCloseTimer) clearInterval(autoCloseTimer);
+  autoCloseStartTime = Date.now();
+  
+  autoCloseTimer = setInterval(() => {
+    const elapsed = Date.now() - autoCloseStartTime;
+    if (elapsed >= AUTO_CLOSE_TIMEOUT) {
+      clearInterval(autoCloseTimer);
+      getCurrentWindow().close();
+    }
+  }, 500);
+}
+
+function resetAutoClose() {
+  autoCloseStartTime = Date.now();
+  const bar = document.getElementById('countdownBar');
+  bar.style.animation = 'none';
+  bar.offsetHeight;
+  bar.style.animation = 'countdown 10s linear forwards';
+}
+
+async function renderPopup(data) {
+  popupData = data;
+
+  const body = document.getElementById('popupBody');
+  const source = data.group_name || data.source || '未知来源';
+  const time = formatTime(data.msg_time || data.time || Date.now() / 1000);
+  const rawContent = data.raw_message || data.content || '';
+  const content = cleanContent(rawContent);
+  const images = data.images || [];
+  const matchReason = data.match_reason || (data.reasons && data.reasons.length > 0 ? `[${data.reasons.join(', ')}]` : '');
+  const nickname = data.sender?.nickname || '';
+
+  const contentHtml = makeLinksClickable(escapeHtml(content));
+  
+  let imagesHtml = '';
+  const hasTextContent = content.trim().length > 0;
+  if (images.length > 0 && hasTextContent) {
+    imagesHtml = images.map(img => 
+      `<img class="msg-image" data-src="${escapeAttr(img)}" alt="图片" referrerpolicy="no-referrer" crossorigin="anonymous" onerror="this.style.border='2px red solid'; this.title='加载失败';">`
+    ).join('');
+  }
+
+  let dupHtml = '';
+  if (data.content_dup_info && data.content_dup_info.count > 1) {
+    dupHtml = `
+      <div class="dup-groups show">
+        <div class="dup-groups-list">${data.content_dup_info.groups.map(g => `<span>🏠 ${escapeHtml(g)}</span>`).join('')}</div>
+      </div>
+    `;
+  }
+
+  body.innerHTML = `
+    <div class="msg-header">
+      <div class="msg-source-wrap">
+        <div class="msg-source"><span class="group-icon">🏠</span>${escapeHtml(source)}</div>
+        ${matchReason ? `<span class="match-reason">${escapeHtml(matchReason)}</span>` : ''}
+      </div>
+      <div class="msg-time">${time}</div>
+    </div>
+    ${dupHtml}
+    <div class="msg-body">
+      <div class="msg-content">${contentHtml}</div>
+      ${imagesHtml}
+    </div>
+    <div class="msg-footer">
+      <div class="msg-meta">${nickname ? `<span>👤 ${escapeHtml(nickname)}</span>` : ''}</div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn copy-btn" id="cardCopyBtn">复制</button>
+        <button class="btn context-btn" id="cardContextBtn">上下文</button>
+      </div>
+    </div>
+  `;
+
+  const imgElements = body.querySelectorAll('.msg-image[data-src]');
+  const imageLoadPromises = [];
+  
+  for (const img of imgElements) {
+    const originalUrl = img.dataset.src;
+    const loadPromise = loadImageToDataUrl(originalUrl).then(dataUrl => {
+      if (dataUrl) {
+        img.src = dataUrl;
+      } else {
+        img.src = originalUrl;
+      }
+      img.removeAttribute('data-src');
+      return new Promise(resolve => {
+        if (img.complete) {
+          resolve();
+        } else {
+          img.onload = resolve;
+          img.onerror = resolve;
+        }
+      });
+    });
+    imageLoadPromises.push(loadPromise);
+  }
+
+  await Promise.all(imageLoadPromises);
+
+  document.getElementById('cardCopyBtn').addEventListener('click', handleCopy);
+  document.getElementById('cardContextBtn').addEventListener('click', handleContext);
+
+  await window.resizeForContent();
+  startAutoClose();
+}
+
+window.resizeForContent = async function() {
+  try {
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    
+    const container = document.getElementById('popupContainer');
+    const body = document.getElementById('popupBody');
+    const countdownBar = document.getElementById('countdownBar');
+
+    const bodyRect = body.getBoundingClientRect();
+    const countdownHeight = countdownBar ? 2 : 0;
+    const padding = 24;
+
+    const contentHeight = bodyRect.height + countdownHeight + padding;
+    const maxHeight = window.screen.height * 0.8;
+    const finalHeight = Math.min(Math.max(contentHeight, 150), maxHeight);
+
+    const contentWidth = Math.max(bodyRect.width + padding, 350);
+    const maxWidth = window.screen.width * 0.5;
+    const finalWidth = Math.min(contentWidth, maxWidth);
+
+    const win = getCurrentWindow();
+    await win.setSize({ type: 'Physical', width: Math.round(finalWidth), height: Math.round(finalHeight) });
+  } catch(e) {
+    console.log('调整窗口大小失败:', e);
+  }
+};
+
+async function handleCopy() {
+  if (!popupData) return;
+  
+  const btn = document.getElementById('cardCopyBtn');
+  btn.textContent = '复制中...';
+  btn.disabled = true;
+
+  try {
+    const images = popupData.images || [];
+    const content = cleanContentForCopy(popupData.raw_message || popupData.content || '');
+    const imageUrl = images.length > 0 ? images[0] : null;
+
+    await invoke('copy_to_clipboard', {
+      text: content,
+      imageUrl: imageUrl
+    });
+
+    btn.textContent = '✓';
+    btn.classList.add('copied');
+
+    setTimeout(() => {
+      btn.textContent = '复制';
+      btn.classList.remove('copied');
+      btn.disabled = false;
+    }, 2000);
+  } catch(e) {
+    console.error('复制失败:', e);
+    btn.textContent = '失败';
+    btn.disabled = false;
+    setTimeout(() => {
+      btn.textContent = '复制';
+    }, 1500);
+  }
+}
+
+async function handleContext() {
+  if (!popupData) return;
+
+  const btn = document.getElementById('cardContextBtn');
+  btn.disabled = true;
+  btn.textContent = '跳转...';
+
+  try {
+    const groupId = popupData.group_id || '';
+    const groupName = popupData.group_name || popupData.source || '';
+    const localId = popupData.local_id || 0;
+
+    await invoke('request_show_context', {
+      groupId: groupId,
+      groupName: groupName,
+      localId: localId
+    });
+
+    setTimeout(() => {
+      getCurrentWindow().close();
+    }, 100);
+  } catch(e) {
+    console.error('查看上下文失败:', e);
+    btn.textContent = '失败';
+    btn.disabled = false;
+    setTimeout(() => {
+      btn.textContent = '上下文';
+    }, 1500);
+  }
+}
+
+const imgOverlay = document.getElementById('imgOverlay');
+const overlayImg = document.getElementById('overlayImg');
+
+document.addEventListener('click', (e) => {
+  if(e.target.classList.contains('msg-image')){
+    overlayImg.src = e.target.src;
+    imgOverlay.classList.add('show');
+  }
+});
+
+imgOverlay.addEventListener('click', () => {
+  imgOverlay.classList.remove('show');
+});
+
+document.addEventListener('mousemove', resetAutoClose);
+document.addEventListener('click', resetAutoClose);
+document.addEventListener('keydown', resetAutoClose);
+
+listen('popup-data', (event) => {
+  renderPopup(event.payload);
+});
+
+setTimeout(() => {
+  if (!popupData) {
+    getCurrentWindow().close();
+  }
+}, 3000);
+
+async function saveWindowState() {
+  try {
+    const win = getCurrentWindow();
+    const position = await win.outerPosition();
+    
+    await invoke('save_popup_state', {
+      x: position.x,
+      y: position.y
+    });
+  } catch(e) {
+    console.log('[弹窗] 保存位置失败:', e);
+  }
+}
+
+let saveStateTimer = null;
+function debouncedSaveWindowState() {
+  if (saveStateTimer) clearTimeout(saveStateTimer);
+  saveStateTimer = setTimeout(saveWindowState, 500);
+}
+
+(async () => {
+  try {
+    const win = getCurrentWindow();
+    await win.onMoved(() => debouncedSaveWindowState());
+  } catch(e) {
+    console.log('[弹窗] 注册移动事件失败:', e);
+  }
+})();
+</script>
+</body>
+</html>

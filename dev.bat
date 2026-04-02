@@ -1,0 +1,3 @@
+@echo off
+echo 启动开发服务器...
+call npm run dev
