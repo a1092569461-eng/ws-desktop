@@ -1116,6 +1116,45 @@ async function showHighlightPopup(source, content, reasons, images, data, dupInf
   }
 }
 
+window.testHighlightPopup = async function(type = 'short') {
+  let testData;
+  
+  if (type === 'long') {
+    testData = {
+      group_id: '12345',
+      group_name: '测试群-长内容',
+      raw_message: '这是一条很长的测试重点消息，包含很多内容。\n\n'.repeat(10) + '关键词：降价、优惠、限时抢购\n\n' + '测试内容 '.repeat(50),
+      message: '这是一条很长的测试重点消息',
+      time: Date.now() / 1000,
+      local_id: 999,
+      sender: { nickname: '测试用户' }
+    };
+  } else if (type === 'medium') {
+    testData = {
+      group_id: '12345',
+      group_name: '测试群-中等内容',
+      raw_message: '这是一条中等长度的测试重点消息。\n\n包含关键词：降价、优惠、限时抢购\n\n还有更多内容在这里显示。',
+      message: '这是一条中等长度的测试重点消息',
+      time: Date.now() / 1000,
+      local_id: 999,
+      sender: { nickname: '测试用户' }
+    };
+  } else {
+    testData = {
+      group_id: '12345',
+      group_name: '测试群-短内容',
+      raw_message: '这是一条测试重点消息，包含关键词：降价、优惠',
+      message: '这是一条测试重点消息',
+      time: Date.now() / 1000,
+      local_id: 999,
+      sender: { nickname: '测试用户' }
+    };
+  }
+  
+  await showHighlightPopup(testData.group_name, testData.raw_message, ['降价', '优惠'], [], testData, null);
+  console.log('[测试] 弹窗已触发, 类型:', type);
+};
+
 function getContextMessages(groupId, currentLocalId) {
   const gid = Number(groupId) || 0;
   const groupMessages = savedMessages.filter(m => Number(m.group_id) === gid);
@@ -1145,7 +1184,7 @@ function showContextModal(groupId, groupName, currentLocalId) {
       const senderName = msg.sender?.nickname || '未知';
       const senderTime = formatTime(msg.time || 0);
       const images = extractImages(msg);
-      const imagesHtml = images.map(img => `<img class="ctx-img" src="${img}" alt="图片" referrerpolicy="no-referrer" crossorigin="anonymous" onerror="this.style.border='2px red solid';">`).join('');
+      const imagesHtml = images.map(img => `<img class="ctx-img" data-src="${img}" alt="图片" referrerpolicy="no-referrer" crossorigin="anonymous" onerror="this.style.border='2px red solid';">`).join('');
       const content = escapeHtml(cleanContent(msg.raw_message || msg.message || ''));
       item.innerHTML = `
         <div class="ctx-header">
@@ -1158,6 +1197,19 @@ function showContextModal(groupId, groupName, currentLocalId) {
         </div>
       `;
       contextList.appendChild(item);
+      
+      const imgElements = item.querySelectorAll('.ctx-img[data-src]');
+      imgElements.forEach(async (img) => {
+        const originalUrl = img.dataset.src;
+        const dataUrl = await loadImageToDataUrl(originalUrl);
+        if (dataUrl) {
+          img.src = dataUrl;
+        } else {
+          img.src = originalUrl;
+        }
+        img.removeAttribute('data-src');
+      });
+      
       if (i < messages.length - 1) {
         const nextTime = messages[i + 1].time || 0;
         const currTime = msg.time || 0;
@@ -1805,16 +1857,27 @@ async function initWindowState() {
     const state = await invoke('load_window_state');
     
     if (state) {
-      try {
-        await appWindow.setPosition({ type: 'Physical', x: state.x, y: state.y });
-      } catch(e) {
-        console.error('位置设置失败:', e);
+      const screen = window.screen;
+      const screenWidth = screen.availWidth;
+      const screenHeight = screen.availHeight;
+      
+      const isValidPosition = state.x > -10000 && state.y > -10000 && 
+                              state.x < screenWidth && state.y < screenHeight;
+      
+      if (isValidPosition) {
+        try {
+          await appWindow.setPosition({ type: 'Physical', x: state.x, y: state.y });
+        } catch(e) {
+          console.error('位置设置失败:', e);
+        }
       }
       
-      try {
-        await appWindow.setSize({ type: 'Physical', width: state.width, height: state.height });
-      } catch(e) {
-        console.error('大小设置失败:', e);
+      if (state.width >= 200 && state.height >= 300) {
+        try {
+          await appWindow.setSize({ type: 'Physical', width: state.width, height: state.height });
+        } catch(e) {
+          console.error('大小设置失败:', e);
+        }
       }
 
       await scrollToBottom();
@@ -1827,12 +1890,26 @@ async function initWindowState() {
   }
 
   let saveStateTimer = null;
+  let isMinimized = false;
+  
   async function saveWindowState() {
     if (saveStateTimer) clearTimeout(saveStateTimer);
     saveStateTimer = setTimeout(async () => {
+      if (isMinimized) return;
       try {
         const position = await appWindow.outerPosition();
         const size = await appWindow.outerSize();
+        
+        console.log('[窗口状态] 准备保存: x=', position.x, ', y=', position.y, ', w=', size.width, ', h=', size.height);
+        
+        if (position.x < -10000 || position.y < -10000) {
+          console.log('[窗口状态] 位置无效，跳过保存');
+          return;
+        }
+        if (size.width < 200 || size.height < 300) {
+          console.log('[窗口状态] 尺寸无效，跳过保存');
+          return;
+        }
         
         await invoke('save_window_state', {
           x: position.x,
@@ -1840,6 +1917,7 @@ async function initWindowState() {
           width: size.width,
           height: size.height
         });
+        console.log('[窗口状态] 保存成功');
       } catch(e) {
         console.error('保存窗口状态失败:', e);
       }
@@ -1852,15 +1930,18 @@ async function initWindowState() {
     
     await appWindow.onCloseRequested(async (event) => {
       event.preventDefault();
+      isMinimized = true;
       try {
         const position = await appWindow.outerPosition();
         const size = await appWindow.outerSize();
-        await invoke('save_window_state', {
-          x: position.x,
-          y: position.y,
-          width: size.width,
-          height: size.height
-        });
+        if (position.x > -10000 && position.y > -10000) {
+          await invoke('save_window_state', {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height
+          });
+        }
       } catch(e) {
         console.error('关闭前保存失败:', e);
       }

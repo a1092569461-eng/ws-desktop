@@ -6,22 +6,26 @@
 <title>重点消息</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;}
-  body{
+  html, body{
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     background:#fff;
     overflow:hidden;
     padding:0;
+    height:100%;
+    width:100%;
   }
   .popup-container{
     display:flex;
     flex-direction:column;
-    height:100vh;
+    height:100%;
+    width:100%;
   }
   .popup-body{
-    flex:1;
+    flex:1 1 auto;
     overflow-y:auto;
     background:#fff;
     padding:12px;
+    min-height:0;
   }
   .btn{
     padding:6px 12px;
@@ -321,11 +325,17 @@ function startAutoClose() {
   if (autoCloseTimer) clearInterval(autoCloseTimer);
   autoCloseStartTime = Date.now();
   
-  autoCloseTimer = setInterval(() => {
+  autoCloseTimer = setInterval(async () => {
     const elapsed = Date.now() - autoCloseStartTime;
     if (elapsed >= AUTO_CLOSE_TIMEOUT) {
       clearInterval(autoCloseTimer);
-      getCurrentWindow().close();
+      try {
+        const win = getCurrentWindow();
+        await win.destroy();
+      } catch(e) {
+        console.error('关闭窗口失败:', e);
+        window.close();
+      }
     }
   }, 500);
 }
@@ -333,9 +343,11 @@ function startAutoClose() {
 function resetAutoClose() {
   autoCloseStartTime = Date.now();
   const bar = document.getElementById('countdownBar');
-  bar.style.animation = 'none';
-  bar.offsetHeight;
-  bar.style.animation = 'countdown 10s linear forwards';
+  if (bar) {
+    bar.style.animation = 'none';
+    bar.offsetHeight;
+    bar.style.animation = 'countdown 10s linear forwards';
+  }
 }
 
 async function renderPopup(data) {
@@ -396,26 +408,38 @@ async function renderPopup(data) {
   
   for (const img of imgElements) {
     const originalUrl = img.dataset.src;
-    const loadPromise = loadImageToDataUrl(originalUrl).then(dataUrl => {
+    const loadPromise = loadImageToDataUrl(originalUrl).then(async (dataUrl) => {
       if (dataUrl) {
         img.src = dataUrl;
       } else {
         img.src = originalUrl;
       }
       img.removeAttribute('data-src');
-      return new Promise(resolve => {
-        if (img.complete) {
+      
+      await new Promise((resolve) => {
+        if (img.complete && img.naturalWidth > 0) {
           resolve();
         } else {
           img.onload = resolve;
           img.onerror = resolve;
         }
       });
+      
+      if (img.decode) {
+        try {
+          await img.decode();
+        } catch(e) {}
+      }
+      
+      await new Promise(resolve => requestAnimationFrame(resolve));
     });
     imageLoadPromises.push(loadPromise);
   }
 
   await Promise.all(imageLoadPromises);
+  
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  await new Promise(resolve => setTimeout(resolve, 100));
 
   document.getElementById('cardCopyBtn').addEventListener('click', handleCopy);
   document.getElementById('cardContextBtn').addEventListener('click', handleContext);
@@ -426,28 +450,62 @@ async function renderPopup(data) {
 
 window.resizeForContent = async function() {
   try {
-    await new Promise(resolve => requestAnimationFrame(resolve));
+    console.log('[弹窗] 开始调整大小...');
     
     const container = document.getElementById('popupContainer');
     const body = document.getElementById('popupBody');
     const countdownBar = document.getElementById('countdownBar');
 
-    const bodyRect = body.getBoundingClientRect();
-    const countdownHeight = countdownBar ? 2 : 0;
+    body.style.height = 'auto';
+    body.style.minHeight = 'auto';
+    body.style.overflow = 'visible';
+    container.style.height = 'auto';
+    
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    await new Promise(resolve => setTimeout(resolve, 150));
+    
+    const imgs = body.querySelectorAll('.msg-image');
+    let imgReady = true;
+    for (const img of imgs) {
+      if (!img.complete || img.naturalWidth === 0) {
+        imgReady = false;
+        console.log('[弹窗] 图片未加载完成:', img.src.substring(0, 50));
+      }
+    }
+    console.log('[弹窗] 图片状态:', imgReady ? '全部加载完成' : '部分未完成');
+    
+    const contentHeight = body.scrollHeight;
+    const contentWidth = body.scrollWidth;
+    
+    console.log('[弹窗] 内容尺寸: scrollHeight=', contentHeight, ', scrollWidth=', contentWidth);
+    
+    const countdownHeight = countdownBar ? 4 : 0;
     const padding = 24;
+    
+    const totalHeight = contentHeight + countdownHeight + padding;
+    const maxHeight = Math.floor(window.screen.height * 0.8);
+    const minHeight = 150;
+    const finalHeight = Math.min(Math.max(totalHeight, minHeight), maxHeight);
 
-    const contentHeight = bodyRect.height + countdownHeight + padding;
-    const maxHeight = window.screen.height * 0.8;
-    const finalHeight = Math.min(Math.max(contentHeight, 150), maxHeight);
+    const finalWidth = Math.min(Math.max(contentWidth + padding, 350), Math.floor(window.screen.width * 0.5));
 
-    const contentWidth = Math.max(bodyRect.width + padding, 350);
-    const maxWidth = window.screen.width * 0.5;
-    const finalWidth = Math.min(contentWidth, maxWidth);
+    console.log('[弹窗] 计算结果: totalHeight=', totalHeight, ', finalHeight=', finalHeight, ', finalWidth=', finalWidth);
+
+    body.style.overflow = 'auto';
+    if (totalHeight > maxHeight) {
+      body.style.height = (finalHeight - countdownHeight - padding) + 'px';
+    } else {
+      body.style.height = 'auto';
+    }
+    container.style.height = '100%';
 
     const win = getCurrentWindow();
+    console.log('[弹窗] 设置窗口大小: ', finalWidth, 'x', finalHeight);
     await win.setSize({ type: 'Physical', width: Math.round(finalWidth), height: Math.round(finalHeight) });
+    console.log('[弹窗] 窗口大小设置完成');
   } catch(e) {
-    console.log('调整窗口大小失败:', e);
+    console.error('调整窗口大小失败:', e);
   }
 };
 
@@ -504,9 +562,15 @@ async function handleContext() {
       localId: localId
     });
 
-    setTimeout(() => {
-      getCurrentWindow().close();
-    }, 100);
+    btn.textContent = '✓';
+    
+    setTimeout(async () => {
+      try {
+        await getCurrentWindow().destroy();
+      } catch(e) {
+        window.close();
+      }
+    }, 200);
   } catch(e) {
     console.error('查看上下文失败:', e);
     btn.textContent = '失败';
@@ -531,17 +595,19 @@ imgOverlay.addEventListener('click', () => {
   imgOverlay.classList.remove('show');
 });
 
-document.addEventListener('mousemove', resetAutoClose);
 document.addEventListener('click', resetAutoClose);
-document.addEventListener('keydown', resetAutoClose);
 
 listen('popup-data', (event) => {
   renderPopup(event.payload);
 });
 
-setTimeout(() => {
+setTimeout(async () => {
   if (!popupData) {
-    getCurrentWindow().close();
+    try {
+      await getCurrentWindow().destroy();
+    } catch(e) {
+      window.close();
+    }
   }
 }, 3000);
 

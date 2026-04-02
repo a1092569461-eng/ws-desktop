@@ -261,8 +261,7 @@ async fn show_highlight_popup(app: AppHandle, data: PopupData) -> Result<String,
     )
     .title("重点消息")
     .inner_size(default_width, default_height)
-    .min_inner_size(300.0, 200.0)
-    .max_inner_size(800.0, 900.0)
+    .min_inner_size(300.0, 150.0)
     .always_on_top(true)
     .decorations(true)
     .transparent(false)
@@ -302,7 +301,7 @@ fn get_existing_popup_count(app: &AppHandle) -> u32 {
 #[tauri::command]
 async fn close_popup(app: AppHandle, popup_id: String) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(&popup_id) {
-        let _ = window.close();
+        let _ = window.destroy();
     }
     Ok(())
 }
@@ -378,10 +377,21 @@ async fn set_window_always_on_top(app: AppHandle, enabled: bool) -> Result<(), S
 
 #[tauri::command]
 async fn save_window_state(app: AppHandle, x: i32, y: i32, width: u32, height: u32) -> Result<(), String> {
+    if x < -10000 || y < -10000 {
+        println!("[窗口状态] 拒绝保存无效位置: x={}, y={}", x, y);
+        return Ok(());
+    }
+    
+    if width < 200 || height < 300 {
+        println!("[窗口状态] 拒绝保存无效尺寸: width={}, height={}", width, height);
+        return Ok(());
+    }
+    
     let store = app.store("window-state.json")
         .map_err(|e| format!("获取存储失败: {}", e))?;
 
     let state = WindowState { x, y, width, height };
+    println!("[窗口状态] 保存: x={}, y={}, width={}, height={}", x, y, width, height);
     store.set("main_window", serde_json::to_value(state).map_err(|e| format!("序列化失败: {}", e))?);
 
     if let Err(e) = store.save() {
@@ -557,8 +567,10 @@ pub fn run() {
                     if let Ok(store) = app.store("window-state.json") {
                         if let Some(value) = store.get("main_window") {
                             if let Ok(state) = serde_json::from_value::<WindowState>(value) {
-                                let _ = window.set_position(tauri::LogicalPosition::new(state.x as f64, state.y as f64));
-                                let _ = window.set_size(tauri::LogicalSize::new(state.width as f64, state.height as f64));
+                                if state.x > -10000 && state.y > -10000 && state.width >= 200 && state.height >= 300 {
+                                    let _ = window.set_position(tauri::LogicalPosition::new(state.x as f64, state.y as f64));
+                                    let _ = window.set_size(tauri::LogicalSize::new(state.width as f64, state.height as f64));
+                                }
                             }
                         }
                     }
