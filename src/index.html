@@ -319,7 +319,7 @@ function levenshteinDistance(a, b) {
 }
 
 const SIMILARITY_THRESHOLD = 0.75;
-const HL_KEYWORDS = ['神价', '漏洞', '0元', '免单', '兔单', '速度', '免费', 'bug', '锁‼', '免', '兔', 'O亓', '快‼️', '有水', '快锁', '自辩'];
+const HL_KEYWORDS = ['神价', '漏洞', '0元', '免单', '兔单', '速度', '免费', 'bug', '锁‼', '免', '兔', 'O亓', '快‼️', '有水', '快锁', '自辩', '𝑩𝒖𝒈'];
 
 function hlIsHighlight(data, allCodes) {
   if (!data || (!data.raw_message && !data.message)) return { triggered: false, reasons: [], keywords: [] };
@@ -1554,17 +1554,48 @@ async function renderSavedMessages(){
         updateDupTag(card, dupInfo);
       }
     });
+    
+    // 图片懒加载 - 不在启动时加载所有图片
     const allImgElements = messagesDiv.querySelectorAll('.msg-image[data-src]');
-    for (const img of allImgElements) {
-      const originalUrl = img.dataset.src;
-      const dataUrl = await loadImageToDataUrl(originalUrl);
-      if (dataUrl) {
-        img.src = dataUrl;
+    allImgElements.forEach(img => {
+      img.addEventListener('visible', async () => {
+        const originalUrl = img.dataset.src;
+        if (originalUrl) {
+          const dataUrl = await loadImageToDataUrl(originalUrl);
+          img.src = dataUrl || originalUrl;
+          img.removeAttribute('data-src');
+        }
+      }, { threshold: 0.1 });
+      
+      // 使用 IntersectionObserver 懒加载
+      if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              const img = entry.target;
+              const originalUrl = img.dataset.src;
+              if (originalUrl) {
+                loadImageToDataUrl(originalUrl).then(dataUrl => {
+                  img.src = dataUrl || originalUrl;
+                  img.removeAttribute('data-src');
+                });
+              }
+              observer.unobserve(img);
+            }
+          });
+        }, { rootMargin: '100px' });
+        observer.observe(img);
       } else {
-        img.src = originalUrl;
+        // 降级处理：直接加载
+        const originalUrl = img.dataset.src;
+        if (originalUrl) {
+          loadImageToDataUrl(originalUrl).then(dataUrl => {
+            img.src = dataUrl || originalUrl;
+            img.removeAttribute('data-src');
+          });
+        }
       }
-      img.removeAttribute('data-src');
-    }
+    });
   }
   renderMessagesByMode();
   await scrollToBottom();

@@ -19,13 +19,13 @@
     flex-direction:column;
     height:100%;
     width:100%;
+    overflow:hidden;
   }
   .popup-body{
-    flex:1 1 auto;
+    flex:1 1 0%;
     overflow-y:auto;
     background:#fff;
     padding:12px;
-    min-height:0;
   }
   .btn{
     padding:6px 12px;
@@ -324,22 +324,23 @@ function cleanContentForCopy(content) {
 function startAutoClose() {
   if (autoCloseTimer) clearInterval(autoCloseTimer);
   autoCloseStartTime = Date.now();
+  let isClosing = false;
   
-  autoCloseTimer = setInterval(async () => {
+  autoCloseTimer = setInterval(() => {
+    if (isClosing) return;
+    
     const elapsed = Date.now() - autoCloseStartTime;
     if (elapsed >= AUTO_CLOSE_TIMEOUT) {
+      isClosing = true;
       clearInterval(autoCloseTimer);
-      try {
-        const popupId = window.location.hash.substring(1);
-        if (popupId) {
-          await invoke('clear_popup_data', { popupId: popupId });
-        }
-        const win = getCurrentWindow();
-        await win.destroy();
-      } catch(e) {
-        console.error('[弹窗] 关闭失败:', e);
+      console.log('[弹窗] 开始关闭流程...');
+      
+      closePopup().then(() => {
+        console.log('[弹窗] 关闭完成');
+      }).catch(err => {
+        console.error('[弹窗] 关闭失败:', err);
         window.close();
-      }
+      });
     }
   }, 500);
 }
@@ -355,6 +356,7 @@ function resetAutoClose() {
 }
 
 async function renderPopup(data) {
+  console.log('[弹窗] renderPopup 被调用');
   popupData = data;
 
   const body = document.getElementById('popupBody');
@@ -363,6 +365,7 @@ async function renderPopup(data) {
     console.error('[弹窗] data 为空，无法渲染');
     return;
   }
+  console.log('[弹窗] 开始渲染内容，图片数量:', (data.images || []).length);
   const source = data.group_name || data.source || '未知来源';
   const time = formatTime(data.msg_time || data.time || Date.now() / 1000);
   const rawContent = data.raw_message || data.content || '';
@@ -425,6 +428,7 @@ async function renderPopup(data) {
       }
       img.removeAttribute('data-src');
       
+      // 等待图片加载完成
       await new Promise((resolve) => {
         if (img.complete && img.naturalWidth > 0) {
           resolve();
@@ -434,21 +438,29 @@ async function renderPopup(data) {
         }
       });
       
+      // 等待图片解码
       if (img.decode) {
         try {
           await img.decode();
         } catch(e) {}
       }
       
+      // 等待图片实际渲染到DOM
       await new Promise(resolve => requestAnimationFrame(resolve));
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      
+      // 额外等待确保布局完成
+      await new Promise(resolve => setTimeout(resolve, 50));
     });
     imageLoadPromises.push(loadPromise);
   }
 
   await Promise.all(imageLoadPromises);
   
+  // 所有图片加载完成后，再等待一下确保DOM完全更新
   await new Promise(resolve => requestAnimationFrame(resolve));
-  await new Promise(resolve => setTimeout(resolve, 100));
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  await new Promise(resolve => setTimeout(resolve, 200));
 
   document.getElementById('cardCopyBtn').addEventListener('click', handleCopy);
   document.getElementById('cardContextBtn').addEventListener('click', handleContext);
@@ -458,43 +470,62 @@ async function renderPopup(data) {
 }
 
 window.resizeForContent = async function() {
+  console.log('[弹窗] resizeForContent 开始');
   try {
-    const container = document.getElementById('popupContainer');
     const body = document.getElementById('popupBody');
-    const countdownBar = document.getElementById('countdownBar');
-
+    
+    // 重置样式，让内容自然撑开
     body.style.height = 'auto';
-    body.style.minHeight = 'auto';
     body.style.overflow = 'visible';
-    container.style.height = 'auto';
     
+    // 等待内容渲染
     await new Promise(resolve => requestAnimationFrame(resolve));
     await new Promise(resolve => requestAnimationFrame(resolve));
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await new Promise(resolve => setTimeout(resolve, 300));
     
+    // 检查图片加载状态
+    const images = body.querySelectorAll('.msg-image');
+    let loadedImages = 0;
+    for (const img of images) {
+      if (img.complete && img.naturalWidth > 0) {
+        loadedImages++;
+      }
+    }
+    console.log(`[弹窗调试] 图片加载状态: ${loadedImages}/${images.length}`);
+    
+    // 获取内容实际尺寸
     const contentHeight = body.scrollHeight;
     const contentWidth = body.scrollWidth;
+    console.log(`[弹窗调试] 内容尺寸: ${contentWidth}x${contentHeight}`);
     
-    const countdownHeight = countdownBar ? 4 : 0;
-    const padding = 24;
+    // 进度条高度 + 上下 padding
+    const barHeight = 2;
+    const verticalPadding = 24;
+    const titleHeight = 40;
     
-    const totalHeight = contentHeight + countdownHeight + padding;
-    const maxHeight = Math.floor(window.screen.height * 0.8);
-    const minHeight = 150;
-    const finalHeight = Math.min(Math.max(totalHeight, minHeight), maxHeight);
-
-    const finalWidth = Math.min(Math.max(contentWidth + padding, 350), Math.floor(window.screen.width * 0.5));
-
-    body.style.overflow = 'auto';
-    if (totalHeight > maxHeight) {
-      body.style.height = (finalHeight - countdownHeight - padding) + 'px';
-    } else {
-      body.style.height = 'auto';
+    // 计算所需窗口高度
+    let neededHeight = contentHeight + barHeight + verticalPadding + titleHeight;
+    const maxHeight = Math.floor(window.screen.height * 0.85);
+    const minHeight = 200;
+    const finalHeight = Math.min(Math.max(neededHeight, minHeight), maxHeight);
+    
+    // 计算窗口宽度
+    const minWidth = 320;
+    const maxWidth = Math.floor(window.screen.width * 0.5);
+    const finalWidth = Math.min(Math.max(contentWidth + 24, minWidth), maxWidth);
+    
+    console.log(`[弹窗调试] 计算尺寸: ${finalWidth}x${finalHeight}`);
+    
+    // 如果内容超过最大高度，设置 body 滚动
+    if (contentHeight + barHeight + verticalPadding + titleHeight > maxHeight) {
+      body.style.height = (maxHeight - barHeight - verticalPadding - titleHeight) + 'px';
+      body.style.overflow = 'auto';
     }
-    container.style.height = '100%';
-
+    
+    // 设置窗口大小
     const win = getCurrentWindow();
     await win.setSize({ type: 'Physical', width: Math.round(finalWidth), height: Math.round(finalHeight) });
+    console.log('[弹窗] resizeForContent 完成');
   } catch(e) {
     console.error('调整窗口大小失败:', e);
   }
@@ -536,14 +567,29 @@ async function handleCopy() {
 }
 
 async function closePopup() {
-  try {
-    const popupId = window.location.hash.substring(1);
-    if (popupId) {
-      await invoke('clear_popup_data', { popupId: popupId });
-    }
-    await getCurrentWindow().destroy();
-  } catch(e) {
+  console.log('[弹窗] closePopup 被调用');
+  
+  const popupId = window.location.hash.substring(1);
+  console.log('[弹窗] popupId:', popupId);
+  
+  if (!popupId) {
+    console.error('[弹窗] 没有 popupId，直接关闭');
     window.close();
+    return;
+  }
+  
+  try {
+    console.log('[弹窗] 调用 Rust close_popup:', popupId);
+    await invoke('close_popup', { popupId: popupId });
+    console.log('[弹窗] close_popup 调用完成');
+  } catch(e) {
+    console.error('[弹窗] close_popup 失败:', e);
+    console.log('[弹窗] 尝试前端关闭...');
+    try {
+      await getCurrentWindow().destroy();
+    } catch(e2) {
+      window.close();
+    }
   }
 }
 
@@ -600,7 +646,7 @@ listen('popup-data', (event) => {
 
 setTimeout(async () => {
   if (!popupData) {
-    closePopup();
+    await closePopup();
   }
 }, 3000);
 
