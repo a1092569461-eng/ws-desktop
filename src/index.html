@@ -319,7 +319,7 @@ function levenshteinDistance(a, b) {
 }
 
 const SIMILARITY_THRESHOLD = 0.75;
-const HL_KEYWORDS = ['神价', '漏洞', '0元', '免单', '兔单', '速度', '免费', 'bug', '锁‼', '免', '兔', 'O亓', '快‼️', '有水', '快锁', '自辩', '𝑩𝒖𝒈'];
+const HL_KEYWORDS = ['神价', '漏洞', '0元', '免单', '兔单', '速度', '免费', 'bug', '锁‼', '免', '兔', 'O亓', '快‼️', '有水', '快锁', '自辩', '𝑩𝒖𝒈', '神车'];
 
 function hlIsHighlight(data, allCodes) {
   if (!data || (!data.raw_message && !data.message)) return { triggered: false, reasons: [], keywords: [] };

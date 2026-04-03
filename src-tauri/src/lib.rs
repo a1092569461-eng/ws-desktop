@@ -88,8 +88,11 @@ async fn debug_log(message: String) {
 
 #[tauri::command]
 async fn get_popup_data(popup_id: String) -> Option<serde_json::Value> {
+    println!("[Rust] get_popup_data 被调用: popup_id={}", popup_id);
     let store = get_popup_store().lock().unwrap();
-    store.data.get(&popup_id).cloned()
+    let result = store.data.get(&popup_id).cloned();
+    println!("[Rust] get_popup_data 结果: {:?}", result.is_some());
+    result
 }
 
 #[tauri::command]
@@ -224,23 +227,21 @@ async fn show_highlight_popup(app: AppHandle, data: PopupData) -> Result<String,
     let default_width = 400.0;
     let default_height = 300.0;
 
-    let saved_state = app.store("window-state.json")
+    let saved_position = app.store("window-state.json")
         .ok()
-        .and_then(|s| s.get("popup_state"))
+        .and_then(|s| s.get("popup_position"))
         .and_then(|v| {
             let x = v.get("x").and_then(|v| v.as_i64()).map(|v| v as i32);
             let y = v.get("y").and_then(|v| v.as_i64()).map(|v| v as i32);
-            let width = v.get("width").and_then(|v| v.as_u64()).map(|v| v as u32);
-            let height = v.get("height").and_then(|v| v.as_u64()).map(|v| v as u32);
-            if let (Some(x), Some(y), Some(w), Some(h)) = (x, y, width, height) {
-                Some((x, y, w, h))
+            if let (Some(x), Some(y)) = (x, y) {
+                Some((x, y))
             } else {
                 None
             }
         });
 
-    let (x, y, width, height) = if let Some((sx, sy, sw, sh)) = saved_state {
-        (sx, sy, sw, sh)
+    let (x, y) = if let Some((sx, sy)) = saved_position {
+        (sx, sy)
     } else {
         let monitor = app.primary_monitor()
             .map_err(|e| format!("获取显示器失败: {}", e))?;
@@ -256,9 +257,9 @@ async fn show_highlight_popup(app: AppHandle, data: PopupData) -> Result<String,
 
             let x = (screen_width - default_width) / 2.0 + offset;
             let y = (screen_height - default_height) / 2.0 + offset;
-            (x as i32, y as i32, default_width as u32, default_height as u32)
+            (x as i32, y as i32)
         } else {
-            (100, 100, default_width as u32, default_height as u32)
+            (100, 100)
         }
     };
     
@@ -268,7 +269,7 @@ async fn show_highlight_popup(app: AppHandle, data: PopupData) -> Result<String,
         tauri::WebviewUrl::App(format!("popup.html#{}", popup_id).into()),
     )
     .title("重点消息")
-    .inner_size(width as f64, height as f64)
+    .inner_size(default_width, default_height)
     .min_inner_size(300.0, 150.0)
     .max_inner_size(800.0, 2000.0)
     .always_on_top(true)
@@ -283,16 +284,20 @@ async fn show_highlight_popup(app: AppHandle, data: PopupData) -> Result<String,
     .map_err(|e| format!("创建弹窗失败: {}", e))?;
     
     let _ = window.show();
+    
     let window_clone = window.clone();
+    let popup_id_clone = popup_id.clone();
+    let data_clone = data.clone();
     tauri::async_runtime::spawn(async move {
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(300));
         let _ = window_clone.set_focus();
+        let payload = serde_json::json!({
+            "popup_id": popup_id_clone,
+            "data": data_clone
+        });
+        let _ = window_clone.emit("popup-initialized", &payload);
+        println!("[Rust] 弹窗数据已发送: {}", popup_id_clone);
     });
-
-    {
-        let mut store = get_popup_store().lock().unwrap();
-        store.data.insert(popup_id.clone(), serde_json::to_value(&data).unwrap_or(serde_json::Value::Null));
-    }
 
     Ok(popup_id)
 }
@@ -429,12 +434,12 @@ async fn load_window_state(app: AppHandle) -> Result<Option<WindowState>, String
 }
 
 #[tauri::command]
-async fn save_popup_state(app: AppHandle, x: i32, y: i32, width: u32, height: u32) -> Result<(), String> {
+async fn save_popup_state(app: AppHandle, x: i32, y: i32) -> Result<(), String> {
     let store = app.store("window-state.json")
         .map_err(|e| format!("获取存储失败: {}", e))?;
     
-    let state = serde_json::json!({ "x": x, "y": y, "width": width, "height": height });
-    store.set("popup_state", state);
+    let position = serde_json::json!({ "x": x, "y": y });
+    store.set("popup_position", position);
     store.save().map_err(|e| format!("保存失败: {}", e))?;
     
     Ok(())

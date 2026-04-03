@@ -199,23 +199,6 @@ let autoCloseStartTime = 0;
 const AUTO_CLOSE_TIMEOUT = 10000;
 const CQ_IMAGE_REG = /\[CQ:image,[^\]]+\]/g;
 
-async function loadPopupData() {
-  const hash = window.location.hash.substring(1);
-  
-  if (hash) {
-    try {
-      const data = await invoke('get_popup_data', { popup_id: hash });
-      if (data) {
-        renderPopup(data);
-      }
-    } catch(e) {
-      console.error('获取数据失败:', e);
-    }
-  }
-}
-
-setTimeout(loadPopupData, 100);
-
 const imageCache = new Map();
 const MAX_CACHE_SIZE = 50;
 
@@ -472,17 +455,8 @@ async function renderPopup(data) {
 window.resizeForContent = async function() {
   console.log('[弹窗] resizeForContent 开始');
   try {
-    const container = document.getElementById('popupContainer');
     const body = document.getElementById('popupBody');
-    
-    // 重置样式，让内容自然撑开
-    body.style.height = 'auto';
-    body.style.overflow = 'visible';
-    
-    // 等待内容渲染
-    await new Promise(resolve => requestAnimationFrame(resolve));
-    await new Promise(resolve => requestAnimationFrame(resolve));
-    await new Promise(resolve => setTimeout(resolve, 300));
+    const container = document.getElementById('popupContainer');
     
     // 检查图片加载状态
     const images = body.querySelectorAll('.msg-image');
@@ -492,39 +466,44 @@ window.resizeForContent = async function() {
         loadedImages++;
       }
     }
-    console.log(`[弹窗调试] 图片加载状态: ${loadedImages}/${images.length}`);
+    console.log(`[弹窗调试] 图片: ${loadedImages}/${images.length}`);
     
-    // 获取整个容器的高度（包括按钮）
-    const totalHeight = container.scrollHeight;
-    const contentWidth = body.scrollWidth;
-    console.log(`[弹窗调试] 容器总高度: ${totalHeight}, 内容宽度: ${contentWidth}`);
+    // 临时切换到block布局获取真实高度
+    const prevDisplay = container.style.display;
+    container.style.display = 'block';
+    body.style.height = 'auto';
+    body.style.overflow = 'visible';
     
-    // 进度条高度
-    const barHeight = 4;
-    // 窗口边框和其他开销预估
-    const windowPadding = 10;
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    await new Promise(resolve => setTimeout(resolve, 150));
     
-    // 计算所需窗口高度 = 容器高度 + 进度条高度 + 窗口边框
-    let neededHeight = totalHeight + barHeight + windowPadding;
-    const maxHeight = Math.floor(window.screen.height * 0.85);
-    const minHeight = 200;
-    const finalHeight = Math.min(Math.max(neededHeight, minHeight), maxHeight);
+    const contentHeight = body.scrollHeight;
+    console.log(`[弹窗调试] 内容高度: ${contentHeight}`);
     
-    // 固定宽度，不调整
+    // 恢复原始布局
+    container.style.display = prevDisplay;
+    body.style.overflow = '';
+    
+    // 计算最终高度
+    // body padding (12px 上下) + 进度条 (4px) + 按钮高度 (约 44px) + 额外高度 (50px) + 窗口边框误差 (约 30px)
+    const bodyPadding = 24;
+    const countdownBarHeight = 4;
+    const buttonHeight = 44;
+    const extraHeight = 50;
+    const windowChrome = 30;
+    const totalHeight = contentHeight + bodyPadding + countdownBarHeight + buttonHeight + extraHeight + windowChrome;
     const fixedWidth = 400;
+    const fixedHeight = Math.min(Math.max(totalHeight, 150), 600);
     
-    console.log(`[弹窗调试] 计算尺寸: ${fixedWidth}x${finalHeight}`);
-    
-    // 如果内容超过最大高度，设置 body 滚动
-    if (neededHeight > maxHeight) {
-      body.style.height = (maxHeight - barHeight - windowPadding - 30) + 'px';
-      body.style.overflow = 'auto';
-    }
+    console.log(`[弹窗调试] 总高度: ${totalHeight}, 窗口高度: ${fixedHeight}`);
     
     // 设置窗口大小
     const win = getCurrentWindow();
-    await win.setSize({ type: 'Physical', width: fixedWidth, height: Math.round(finalHeight) });
+    await win.setSize({ type: 'Physical', width: fixedWidth, height: fixedHeight });
     console.log('[弹窗] resizeForContent 完成');
+    
+    // 立即保存位置
+    saveWindowState();
   } catch(e) {
     console.error('调整窗口大小失败:', e);
   }
@@ -635,50 +614,41 @@ document.addEventListener('click', (e) => {
 
 imgOverlay.addEventListener('click', () => {
   imgOverlay.classList.remove('show');
+  resetAutoClose();
 });
 
 document.addEventListener('click', resetAutoClose);
 
 const myPopupId = window.location.hash.substring(1);
 console.log('[弹窗] 我的ID:', myPopupId);
+console.log('[弹窗] 完整URL:', window.location.href);
 
-invoke('get_popup_data', { popup_id: myPopupId }).then(data => {
-  if (data) {
-    console.log('[弹窗] 获取到自己的数据');
-    renderPopup(data);
-  } else {
-    console.log('[弹窗] 没有获取到数据');
+listen('popup-initialized', (event) => {
+  console.log('[弹窗] 收到初始化事件:', event.payload);
+  const payload = event.payload;
+  if (payload && payload.popup_id === myPopupId && payload.data) {
+    console.log('[弹窗] 收到自己的数据');
+    renderPopup(payload.data);
   }
-}).catch(err => {
-  console.error('[弹窗] 获取数据失败:', err);
 });
 
-setTimeout(async () => {
-  if (!popupData) {
-    console.log('[弹窗] 3秒后仍无数据，关闭');
-    await closePopup();
-  }
-}, 3000);
+console.log('[弹窗] 等待数据到达...');
 
 async function saveWindowState() {
   try {
     const win = getCurrentWindow();
     const position = await win.outerPosition();
-    const size = await win.innerSize();
     
     if (position.x < -10000 || position.y < -10000) return;
-    if (size.width < 100 || size.height < 100) return;
     
-    console.log('[弹窗] 保存状态: x=', position.x, ', y=', position.y, ', w=', size.width, ', h=', size.height);
+    console.log('[弹窗] 保存位置: x=', position.x, ', y=', position.y);
     
     await invoke('save_popup_state', {
       x: position.x,
-      y: position.y,
-      width: size.width,
-      height: size.height
+      y: position.y
     });
   } catch(e) {
-    console.log('[弹窗] 保存状态失败:', e);
+    console.log('[弹窗] 保存位置失败:', e);
   }
 }
 
