@@ -204,7 +204,7 @@ async function loadPopupData() {
   
   if (hash) {
     try {
-      const data = await invoke('get_popup_data', { popupId: hash });
+      const data = await invoke('get_popup_data', { popup_id: hash });
       if (data) {
         renderPopup(data);
       }
@@ -472,6 +472,7 @@ async function renderPopup(data) {
 window.resizeForContent = async function() {
   console.log('[弹窗] resizeForContent 开始');
   try {
+    const container = document.getElementById('popupContainer');
     const body = document.getElementById('popupBody');
     
     // 重置样式，让内容自然撑开
@@ -493,38 +494,36 @@ window.resizeForContent = async function() {
     }
     console.log(`[弹窗调试] 图片加载状态: ${loadedImages}/${images.length}`);
     
-    // 获取内容实际尺寸
-    const contentHeight = body.scrollHeight;
+    // 获取整个容器的高度（包括按钮）
+    const totalHeight = container.scrollHeight;
     const contentWidth = body.scrollWidth;
-    console.log(`[弹窗调试] 内容尺寸: ${contentWidth}x${contentHeight}`);
+    console.log(`[弹窗调试] 容器总高度: ${totalHeight}, 内容宽度: ${contentWidth}`);
     
-    // 进度条高度 + 上下 padding
-    const barHeight = 2;
-    const verticalPadding = 24;
-    const titleHeight = 40;
+    // 进度条高度
+    const barHeight = 4;
+    // 窗口边框和其他开销预估
+    const windowPadding = 10;
     
-    // 计算所需窗口高度
-    let neededHeight = contentHeight + barHeight + verticalPadding + titleHeight;
+    // 计算所需窗口高度 = 容器高度 + 进度条高度 + 窗口边框
+    let neededHeight = totalHeight + barHeight + windowPadding;
     const maxHeight = Math.floor(window.screen.height * 0.85);
     const minHeight = 200;
     const finalHeight = Math.min(Math.max(neededHeight, minHeight), maxHeight);
     
-    // 计算窗口宽度
-    const minWidth = 320;
-    const maxWidth = Math.floor(window.screen.width * 0.5);
-    const finalWidth = Math.min(Math.max(contentWidth + 24, minWidth), maxWidth);
+    // 固定宽度，不调整
+    const fixedWidth = 400;
     
-    console.log(`[弹窗调试] 计算尺寸: ${finalWidth}x${finalHeight}`);
+    console.log(`[弹窗调试] 计算尺寸: ${fixedWidth}x${finalHeight}`);
     
     // 如果内容超过最大高度，设置 body 滚动
-    if (contentHeight + barHeight + verticalPadding + titleHeight > maxHeight) {
-      body.style.height = (maxHeight - barHeight - verticalPadding - titleHeight) + 'px';
+    if (neededHeight > maxHeight) {
+      body.style.height = (maxHeight - barHeight - windowPadding - 30) + 'px';
       body.style.overflow = 'auto';
     }
     
     // 设置窗口大小
     const win = getCurrentWindow();
-    await win.setSize({ type: 'Physical', width: Math.round(finalWidth), height: Math.round(finalHeight) });
+    await win.setSize({ type: 'Physical', width: fixedWidth, height: Math.round(finalHeight) });
     console.log('[弹窗] resizeForContent 完成');
   } catch(e) {
     console.error('调整窗口大小失败:', e);
@@ -640,12 +639,23 @@ imgOverlay.addEventListener('click', () => {
 
 document.addEventListener('click', resetAutoClose);
 
-listen('popup-data', (event) => {
-  renderPopup(event.payload);
+const myPopupId = window.location.hash.substring(1);
+console.log('[弹窗] 我的ID:', myPopupId);
+
+invoke('get_popup_data', { popup_id: myPopupId }).then(data => {
+  if (data) {
+    console.log('[弹窗] 获取到自己的数据');
+    renderPopup(data);
+  } else {
+    console.log('[弹窗] 没有获取到数据');
+  }
+}).catch(err => {
+  console.error('[弹窗] 获取数据失败:', err);
 });
 
 setTimeout(async () => {
   if (!popupData) {
+    console.log('[弹窗] 3秒后仍无数据，关闭');
     await closePopup();
   }
 }, 3000);
@@ -654,15 +664,21 @@ async function saveWindowState() {
   try {
     const win = getCurrentWindow();
     const position = await win.outerPosition();
+    const size = await win.innerSize();
     
     if (position.x < -10000 || position.y < -10000) return;
+    if (size.width < 100 || size.height < 100) return;
+    
+    console.log('[弹窗] 保存状态: x=', position.x, ', y=', position.y, ', w=', size.width, ', h=', size.height);
     
     await invoke('save_popup_state', {
       x: position.x,
-      y: position.y
+      y: position.y,
+      width: size.width,
+      height: size.height
     });
   } catch(e) {
-    console.log('[弹窗] 保存位置失败:', e);
+    console.log('[弹窗] 保存状态失败:', e);
   }
 }
 
@@ -676,8 +692,9 @@ function debouncedSaveWindowState() {
   try {
     const win = getCurrentWindow();
     await win.onMoved(() => debouncedSaveWindowState());
+    await win.onResized(() => debouncedSaveWindowState());
   } catch(e) {
-    console.log('[弹窗] 注册移动事件失败:', e);
+    console.log('[弹窗] 注册事件失败:', e);
   }
 })();
 </script>

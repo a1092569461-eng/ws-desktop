@@ -1895,7 +1895,9 @@ async function initWindowState() {
       if (isMinimized) return;
       try {
         const position = await appWindow.outerPosition();
-        const size = await appWindow.outerSize();
+        const size = await appWindow.innerSize();
+        
+        console.log('[窗口状态] 保存: x=', position.x, ', y=', position.y, ', w=', size.width, ', h=', size.height);
         
         if (position.x < -10000 || position.y < -10000) return;
         if (size.width < 200 || size.height < 300) return;
@@ -1921,7 +1923,7 @@ async function initWindowState() {
       isMinimized = true;
       try {
         const position = await appWindow.outerPosition();
-        const size = await appWindow.outerSize();
+        const size = await appWindow.innerSize();
         if (position.x > -10000 && position.y > -10000) {
           await invoke('save_window_state', {
             x: position.x,
