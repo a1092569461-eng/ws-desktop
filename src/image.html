@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>图片查看</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #1a1a1a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    cursor: zoom-out;
+  }
+  .loading {
+    color: #fff;
+    font-size: 16px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  .error {
+    color: #ff6b6b;
+    font-size: 14px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    text-align: center;
+    padding: 20px;
+  }
+</style>
+</head>
+<body>
+<div class="loading" id="loading">加载中...</div>
+<img id="image" style="display: none;" alt="图片">
+
+<script type="module">
+const { getCurrentWindow } = window.__TAURI__.window;
+const { listen } = window.__TAURI__.event;
+const appWindow = getCurrentWindow();
+
+const loadingEl = document.getElementById('loading');
+const imageEl = document.getElementById('image');
+
+function loadImage(imageSrc) {
+  if (!imageSrc) {
+    loadingEl.textContent = '未找到图片地址';
+    loadingEl.classList.add('error');
+    return;
+  }
+
+  let imageUrl = imageSrc;
+  
+  if (!imageSrc.startsWith('data:') && !imageSrc.startsWith('blob:')) {
+    if (imageSrc.startsWith('http://') || imageSrc.startsWith('https://')) {
+      imageUrl = imageSrc;
+    } else if (imageSrc.startsWith('proxy.php?url=')) {
+      const encoded = imageSrc.replace('proxy.php?url=', '');
+      try {
+        imageUrl = decodeURIComponent(encoded);
+      } catch(e) {
+        imageUrl = encoded;
+      }
+    } else {
+      imageUrl = 'https://' + imageSrc;
+    }
+  }
+
+  console.log('[图片查看] 加载图片:', imageUrl);
+
+  imageEl.onload = async () => {
+    loadingEl.style.display = 'none';
+    imageEl.style.display = 'block';
+    
+    const naturalWidth = imageEl.naturalWidth;
+    const naturalHeight = imageEl.naturalHeight;
+    
+    console.log('[图片查看] 图片尺寸:', naturalWidth, 'x', naturalHeight);
+    
+    if (naturalWidth > 0 && naturalHeight > 0) {
+      try {
+        await appWindow.setSize({
+          type: 'Physical',
+          width: Math.min(naturalWidth, 1400),
+          height: Math.min(naturalHeight, 900)
+        });
+      } catch(e) {
+        console.error('[图片查看] 调整窗口大小失败:', e);
+      }
+    }
+  };
+
+  imageEl.onerror = () => {
+    loadingEl.textContent = '图片加载失败';
+    loadingEl.classList.add('error');
+  };
+
+  imageEl.src = imageUrl;
+}
+
+listen('image-data', (event) => {
+  console.log('[图片查看] 收到图片数据:', event.payload);
+  const payload = event.payload;
+  if (payload && payload.url) {
+    loadImage(payload.url);
+  }
+});
+
+imageEl.addEventListener('click', () => {
+  appWindow.close();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    appWindow.close();
+  }
+});
+</script>
+</body>
+</html>

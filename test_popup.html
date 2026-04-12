@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>测试弹窗</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:40px;max-width:800px;margin:0 auto;}
+  h1{color:#333;margin-bottom:20px;}
+  .test-btn{padding:12px 24px;margin:10px;border:none;border-radius:8px;font-size:16px;cursor:pointer;}
+  .test-btn.keyword{background:#ff9800;color:#fff;}
+  .test-btn.price{background:#4caf50;color:#fff;}
+  .test-btn.short{background:#2196f3;color:#fff;}
+  .log-area{margin-top:20px;padding:20px;background:#f5f5f5;border-radius:8px;min-height:200px;}
+  .log-item{margin:8px 0;padding:8px;background:#fff;border-radius:4px;}
+</style>
+</head>
+<body>
+<h1>弹窗功能测试</h1>
+<p>点击下面的按钮模拟发送重点消息：</p>
+
+<button class="test-btn keyword" onclick="testKeywordMsg()">关键词测试（神价漏洞）</button>
+<button class="test-btn price" onclick="testPriceMsg()">好价测试（5元+链接）</button>
+<button class="test-btn short" onclick="testShortMsg()">短文案测试（6字内+链接）</button>
+
+<div class="log-area" id="logArea">
+  <div class="log-item">等待测试...</div>
+</div>
+
+<script>
+const HL_KEYWORDS = ['神价', '漏洞', '0元', '免单', '兔单', '速度', '免费', 'bug', '锁‼', '免', '兔', 'O亓', '快‼️', '有水', '快锁', '自辩'];
+
+function cleanContent(content) {
+  content = String(content);
+  content = content.replace(/\[CQ:image,[^\]]+\]/g, '');
+  content = content.replace(/\[CQ:reply,[^\]]+\]/g, '');
+  content = content.replace(/\[CQ:at,qq=\d+,name=([^\]]+)\]/g, '@$1');
+  content = content.replace(/\[CQ:[^\]]+\]/g, '');
+  content = content.replace(/&#91;/g, '[');
+  content = content.replace(/&#93;/g, ']');
+  content = content.replace(/&amp;/g, '&');
+  return content.trim();
+}
+
+function hlIsHighlight(data, allCodes) {
+  if (!data || (!data.raw_message && !data.message)) return { triggered: false, reasons: [], keywords: [] };
+  const text = cleanContent(data.raw_message || data.message || '');
+  const rawText = data.raw_message || data.message || '';
+  const hasCodes = allCodes && allCodes.length > 0;
+  const hasLink = /(?:jd\.com|taobao\.com|tmall\.com|jd\.cn|mao\.mall)/i.test(rawText);
+  const hasCodeOrLink = hasCodes || hasLink;
+  
+  let cleanedText = text;
+  cleanedText = cleanedText.replace(/[^\u4e00-\u9fa5]*[a-zA-Z0-9]{11}[^\u4e00-\u9fa5]*/gi, '');
+  cleanedText = cleanedText.replace(/https?:\/\/[^\s<>]+/gi, '');
+  cleanedText = cleanedText.replace(/(?:链接|口令|密码|提取码|淘口令)[：:]\s*/gi, '');
+  
+  const keywords = [];
+  for (const kw of HL_KEYWORDS) {
+    if (cleanedText.toLowerCase().includes(kw.toLowerCase())) {
+      keywords.push(kw);
+    }
+  }
+  
+  const reasons = [];
+  if (keywords.length > 0) reasons.push(`关键词:${keywords.join(',')}`);
+  
+  const price = 5;
+  const hasPrice = price !== null;
+  if (hasPrice && price <= 6 && hasCodeOrLink) {
+    reasons.push(`好价:${price}元`);
+  }
+  
+  const pureText = cleanedText.replace(/[\s,，。.，。！!？?\d]+/g, ' ').trim();
+  const pureTextLength = pureText.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').length;
+  if (pureTextLength <= 7 && hasCodeOrLink) {
+    reasons.push('短文案');
+  }
+  
+  return { triggered: reasons.length > 0, reasons, keywords, price };
+}
+
+function log(message) {
+  const logArea = document.getElementById('logArea');
+  const item = document.createElement('div');
+  item.className = 'log-item';
+  item.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+  logArea.insertBefore(item, logArea.firstChild);
+}
+
+function showHighlightPopup(source, content, reasons, images, data, dupInfo) {
+  log(`尝试弹窗 - 来源: ${source}`);
+  log(`内容: ${content.substring(0, 50)}...`);
+  log(`原因: ${reasons.join(', ')}`);
+  
+  const popupData = {
+    source: source,
+    content: cleanContent(content),
+    raw_message: data.raw_message || data.message || '',
+    reasons: reasons,
+    images: images || [],
+    time: new Date().toLocaleString('zh-CN'),
+    group_id: data?.group_id || '',
+    group_name: source,
+    msg_time: data?.time || 0,
+    local_id: data?.local_id || 0,
+    is_highlight: true,
+    match_reason: reasons.length > 0 ? `[${reasons.join(', ')}]` : '',
+    content_dup_info: dupInfo ? { count: dupInfo.count, groups: dupInfo.groups } : null
+  };
+  
+  log('弹窗数据准备完成！');
+  log('在真实应用中，会调用 Tauri 的 show_highlight_popup 命令');
+  log('--- 弹窗模拟成功 ---');
+  
+  console.log('弹窗数据:', popupData);
+}
+
+function testKeywordMsg() {
+  log('--- 关键词测试开始 ---');
+  
+  const testData = {
+    raw_message: '神价漏洞！京东爆款商品限时抢购，手慢无！',
+    group_name: '测试群-1',
+    group_id: '123456',
+    time: Date.now() / 1000,
+    local_id: 1
+  };
+  
+  const allCodes = [];
+  const hlResult = hlIsHighlight(testData, allCodes);
+  
+  log(`重点检测结果: ${hlResult.triggered ? '是' : '否'}`);
+  
+  if (hlResult.triggered) {
+    showHighlightPopup(
+      testData.group_name,
+      testData.raw_message,
+      hlResult.reasons,
+      [],
+      testData,
+      { count: 1, groups: [testData.group_name] }
+    );
+  }
+}
+
+function testPriceMsg() {
+  log('--- 好价测试开始 ---');
+  
+  const testData = {
+    raw_message: '京东好物 仅需5元 https://item.jd.com/12345678.html 速抢！',
+    group_name: '测试群-2',
+    group_id: '789012',
+    time: Date.now() / 1000,
+    local_id: 2
+  };
+  
+  const allCodes = [];
+  const hlResult = hlIsHighlight(testData, allCodes);
+  
+  log(`重点检测结果: ${hlResult.triggered ? '是' : '否'}`);
+  
+  if (hlResult.triggered) {
+    showHighlightPopup(
+      testData.group_name,
+      testData.raw_message,
+      hlResult.reasons,
+      [],
+      testData,
+      { count: 1, groups: [testData.group_name] }
+    );
+  }
+}
+
+function testShortMsg() {
+  log('--- 短文案测试开始 ---');
+  
+  const testData = {
+    raw_message: '速抢 https://item.jd.com/87654321.html',
+    group_name: '测试群-3',
+    group_id: '345678',
+    time: Date.now() / 1000,
+    local_id: 3
+  };
+  
+  const allCodes = [];
+  const hlResult = hlIsHighlight(testData, allCodes);
+  
+  log(`重点检测结果: ${hlResult.triggered ? '是' : '否'}`);
+  
+  if (hlResult.triggered) {
+    showHighlightPopup(
+      testData.group_name,
+      testData.raw_message,
+      hlResult.reasons,
+      [],
+      testData,
+      { count: 1, groups: [testData.group_name] }
+    );
+  }
+}
+
+log('测试页面加载完成！');
+</script>
+</body>
+</html>
